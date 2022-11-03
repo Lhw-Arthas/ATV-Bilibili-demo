@@ -15,6 +15,7 @@ class BilibiliVideoResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelega
         static let customScheme = "atv"
         static let customPrefix = customScheme + "://"
         static let play = customPrefix + "play"
+        static let subtitles = customPrefix + "subtitles"
     }
 
     private var audioPlaylist = ""
@@ -25,6 +26,7 @@ class BilibiliVideoResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelega
     private let badRequestErrorCode = 455
 
     private var playlists = [String]()
+    private var subtitlesLists = [String]()
     private var hasAudioInMasterListAdded = false
     private(set) var playInfo: VideoPlayURLInfo?
 
@@ -48,7 +50,7 @@ class BilibiliVideoResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelega
     private func addVideoPlayBackInfo(codec: String, width: Int, height: Int, frameRate: String, bandwidth: Int, duration: Int, url: String, sar: String) {
         guard !videoCodecBlackList.contains(codec) else { return }
         let content = """
-        #EXT-X-STREAM-INF:AUDIO="audio",CODECS="\(codec)",RESOLUTION=\(width)x\(height),FRAME-RATE=\(frameRate),BANDWIDTH=\(bandwidth)
+        #EXT-X-STREAM-INF:AUDIO="audio",CODECS="\(codec)",RESOLUTION=\(width)x\(height),FRAME-RATE=\(frameRate),BANDWIDTH=\(bandwidth),SUBTITLES="subs"
         \(URLs.customPrefix)\(playlists.count)
 
         """
@@ -93,7 +95,67 @@ class BilibiliVideoResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelega
         playlists.append(playList)
     }
 
-    func setBilibili(info: VideoPlayURLInfo) {
+    private func addSubtitles(subtitles: VideoSubtitles, duration: Int) {
+        let content = """
+        #EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="\(subtitles.lanDoc)",URI="\(URLs.subtitles)\(subtitlesLists.count)"
+
+        """
+        masterPlaylist.append(content)
+
+        let playList = """
+        #EXTM3U
+        #EXT-X-TARGETDURATION:\(duration)
+        #EXT-X-VERSION:3
+        #EXT-X-MEDIA-SEQUENCE:0
+        #EXT-X-PLAYLIST-TYPE:EVENT
+        \(URLs.subtitles)\(subtitlesLists.count)
+        #EXT-X-ENDLIST
+        """
+        playlists.append(playList)
+
+        var vttList = """
+        WEBVTT
+        X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000
+
+
+        """
+
+        for content in subtitles.content {
+            let vtt = """
+            \(transToHourMinSec(time: content.from)) --> \(transToHourMinSec(time: content.to)) align:center line:-1
+            \(content.content)
+
+
+            """
+            vttList.append(vtt)
+        }
+        subtitlesLists.append(vttList)
+    }
+
+    func transToHourMinSec(time: Float) -> String {
+        let allTime = Int(time)
+        var hours = 0
+        var minutes = 0
+        var seconds = 0
+        var hoursText = ""
+        var minutesText = ""
+        var secondsText = ""
+
+        let millSec = Int((time - Float(allTime)) * 1000)
+
+        hours = allTime / 3600
+        hoursText = hours > 9 ? "\(hours)" : "0\(hours)"
+
+        minutes = allTime % 3600 / 60
+        minutesText = minutes > 9 ? "\(minutes)" : "0\(minutes)"
+
+        seconds = allTime % 3600 % 60
+        secondsText = seconds > 9 ? "\(seconds)" : "0\(seconds)"
+
+        return "\(hoursText):\(minutesText):\(secondsText).\(millSec)"
+    }
+
+    func setBilibili(info: VideoPlayURLInfo, subtitlesList: [VideoSubtitles]) {
         playInfo = info
         reset()
         var videos = info.dash.video
@@ -126,6 +188,12 @@ class BilibiliVideoResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelega
         for audio in info.dash.audio {
             for url in audio.playableURLs {
                 addAudioPlayBackInfo(codec: audio.codecs, bandwidth: audio.bandwidth, duration: info.dash.duration, url: url)
+            }
+        }
+
+        if subtitlesList.count > 0 {
+            for subtitles in subtitlesList {
+                addSubtitles(subtitles: subtitles, duration: info.dash.duration)
             }
         }
     }
@@ -168,8 +236,17 @@ private extension BilibiliVideoResourceLoaderDelegate {
             report(loadingRequest, content: masterPlaylist)
             return
         }
+        print("handle loading", customUrl)
+        if customUrl.hasPrefix(URLs.subtitles) {
+            if let index = Int(customUrl.dropFirst(URLs.subtitles.count)) {
+                let subtitles = subtitlesLists[index]
+                report(loadingRequest, content: subtitles)
+                return
+            }
+        }
         if let index = Int(customUrl.dropFirst(URLs.customPrefix.count)) {
             let playlist = playlists[index]
+            print(playlist)
             report(loadingRequest, content: playlist)
             return
         }

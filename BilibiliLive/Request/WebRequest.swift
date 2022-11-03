@@ -127,10 +127,11 @@ enum WebRequest {
                                       url: URLConvertible,
                                       parameters: Parameters = [:],
                                       headers: [String: String]? = nil,
-                                      decoder: JSONDecoder? = nil) async throws -> T
+                                      decoder: JSONDecoder? = nil,
+                                      dataObj: String = "data") async throws -> T
     {
         return try await withCheckedThrowingContinuation { configure in
-            request(method: method, url: url, parameters: parameters, headers: headers, decoder: decoder) {
+            request(method: method, url: url, parameters: parameters, headers: headers, decoder: decoder, dataObj: dataObj) {
                 (res: Result<T, RequestError>) in
                 switch res {
                 case let .success(content):
@@ -182,6 +183,15 @@ extension WebRequest {
                 complete?(info)
             }
         }
+    }
+
+    static func requestPlayerInfo2(aid: Int, cid: Int) async throws -> PlayerInfo {
+        return try await request(url: EndPoint.playerInfo,
+                                 parameters: ["aid": aid, "cid": cid])
+    }
+
+    static func requestSubtitles(url: String) async throws -> JSON {
+        return try await request(url: url, dataObj: "body")
     }
 
     static func requestRelatedVideo(aid: Int, complete: (([VideoDetail]) -> Void)? = nil) {
@@ -477,8 +487,35 @@ struct UpSpaceReq: Codable, Hashable {
 struct PlayerInfo: Codable {
     let last_play_time: Int
 
+    let subtitle: Subtitle
+
     var playTimeInSecond: Int {
         last_play_time / 1000
+    }
+
+    struct Subtitle: Codable {
+        let subtitles: [Subtitles]
+
+        struct Subtitles: Codable {
+            let lan: String
+            let lan_doc: String
+            let subtitle_url: String
+
+            var subtitleUrl: String {
+                "https:\(subtitle_url)"
+            }
+        }
+    }
+}
+
+struct VideoSubtitles {
+    var lan: String
+    var lanDoc: String
+    var content: [VideoSubtitlesContent]
+    struct VideoSubtitlesContent {
+        var from: Float
+        var to: Float
+        var content: String
     }
 }
 

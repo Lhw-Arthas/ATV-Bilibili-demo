@@ -47,7 +47,7 @@ class VideoPlayerViewController: CommonPlayerViewController {
         }
     }
 
-    func playmedia(info: VideoPlayURLInfo) async {
+    func playmedia(info: VideoPlayURLInfo, subtitlesList: [VideoSubtitles]) async {
         let playURL = URL(string: BilibiliVideoResourceLoaderDelegate.URLs.play)!
         let headers: [String: String] = [
             "User-Agent": "Bilibili/APPLE TV",
@@ -55,7 +55,7 @@ class VideoPlayerViewController: CommonPlayerViewController {
         ]
         let asset = AVURLAsset(url: playURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         playerDelegate = BilibiliVideoResourceLoaderDelegate()
-        playerDelegate?.setBilibili(info: info)
+        playerDelegate?.setBilibili(info: info, subtitlesList: subtitlesList)
         asset.resourceLoader.setDelegate(playerDelegate, queue: DispatchQueue(label: "loader"))
         let requestedKeys = ["playable"]
         await asset.loadValues(forKeys: requestedKeys)
@@ -79,7 +79,10 @@ extension VideoPlayerViewController {
         do {
             let playData = try await WebRequest.requestPlayUrl(aid: aid, cid: cid!)
             print(playData)
-            await playmedia(info: playData)
+
+            let subtitlesList = try await getSubtitles(aid: aid, cid: cid!)
+
+            await playmedia(info: playData, subtitlesList: subtitlesList)
 
             let info = await WebRequest.requestDetailVideo(aid: aid!)
             setPlayerInfo(title: info?.title, subTitle: info?.owner.name, desp: info?.desc, pic: info?.pic)
@@ -112,6 +115,22 @@ extension VideoPlayerViewController {
                 print(err)
             }
         }
+    }
+
+    func getSubtitles(aid: Int, cid: Int) async throws -> [VideoSubtitles] {
+        var subtitlesList: [VideoSubtitles] = []
+        let playerInfo = try await WebRequest.requestPlayerInfo2(aid: aid, cid: cid)
+        if playerInfo.subtitle.subtitles.count > 0 {
+            for subtitle in playerInfo.subtitle.subtitles {
+                let subtitleContentList = try await WebRequest.requestSubtitles(url: subtitle.subtitleUrl)
+                let subtitleContents = subtitleContentList.arrayValue.map { subtitleItem in
+                    VideoSubtitles.VideoSubtitlesContent(from: subtitleItem["from"].numberValue.floatValue, to: subtitleItem["to"].numberValue.floatValue, content: subtitleItem["content"].stringValue)
+                }
+                let videoSubtitles = VideoSubtitles(lan: subtitle.lan, lanDoc: subtitle.lan_doc, content: subtitleContents)
+                subtitlesList.append(videoSubtitles)
+            }
+        }
+        return subtitlesList
     }
 }
 
